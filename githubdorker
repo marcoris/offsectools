@@ -1,44 +1,262 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-echo "GitHub Dorker - Generate GitHub search queries"
-echo "---------------------------------------------"
+echo "GitHub Dorker - Generate ALL combinations (with and without user)"
+echo "-----------------------------------------------------------------"
 
-read -p "Enter the GitHub username: " github_user
-read -p "Enter file extensions to search for (e.g., php txt json): " -a extensions
+# --- Input: GitHub users (one per line, optional) ---
+echo "Enter GitHub usernames (one per line). Empty line ends input. Leave empty to skip users."
+github_users=()
+while true; do
+    IFS= read -r u || true
+    [[ -z "${u// /}" ]] && break
+    github_users+=("$u")
+done
 
-echo "Select the search type (enter the number):"
-echo "1) code"
-echo "2) repositories"
-echo "3) issues"
-echo "4) pullrequests"
-echo "5) discussions"
-echo "6) registrypackages"
-read -p "Your choice: " search_type_choice
+# --- Input: search terms (one per line, optional) ---
+echo
+echo "Enter search keywords/terms (one per line). Empty line ends input. Leave empty to skip terms."
+echo "Examples: password, api_key, config.json, ssh-rsa"
+search_terms=()
+while true; do
+    IFS= read -r t || true
+    [[ -z "${t// /}" ]] && break
+    search_terms+=("$t")
+done
 
-case $search_type_choice in
-    1) search_type="code";;
-    2) search_type="repositories";;
-    3) search_type="issues";;
-    4) search_type="pullrequests";;
-    5) search_type="discussions";;
-    6) search_type="registrypackages";;
-    *) echo "Invalid choice, defaulting to 'code'"; search_type="code";;
-esac
+# --- Input: extensions (space separated, optional) ---
+echo
+read -rp "Enter file extensions separated by spaces (e.g. php json env). Leave empty to skip: " -r ext_line
+if [[ -n "${ext_line// /}" ]]; then
+    read -r -a extensions <<< "$ext_line"
+else
+    extensions=()
+fi
+
+# --- Search type selection (github 'type' param) ---
+echo
+echo "Select the search type:"
+options=("code" "repositories" "issues" "pullrequests" "discussions" "registrypackages")
+for i in "${!options[@]}"; do
+    printf "%d) %s\n" $((i+1)) "${options[$i]}"
+done
+read -rp "Your choice (1-${#options[@]}, default 1): " choice
+choice=${choice:-1}
+if ! [[ "$choice" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#options[@]} )); then
+    choice=1
+fi
+search_type="${options[$((choice-1))]}"
 
 base_url="https://github.com/search?q="
 
-path_filter=""
-for ext in "${extensions[@]}"; do
-    if [ -z "$path_filter" ]; then
-        path_filter="path:*.${ext}"
+# --- Helper: generate all non-empty subsets of an array (returns array) ---
+subsets_non_empty() {
+    local -n arr=$1
+    local -n out=$2
+    out=()
+    local n=${#arr[@]}
+    if (( n == 0 )); then
+        return
+    fi
+    local max=$((1<<n))
+    for ((mask=1; mask<max; mask++)); do
+        local parts=()
+        for ((i=0;i<n;i++)); do
+            if (( (mask>>i) & 1 )); then
+                parts+=("${arr[i]}")
+            fi
+        done
+        printf -v joined "%s " "${parts[@]}"
+        joined="${joined% }"
+        out+=("$joined")
+    done
+}
+
+# --- URL encode (python preferred) ---
+url_encode() {
+    local raw="$1"
+    if command -v python3 >/dev/null 2>&1; then
+        python3 -c "import urllib.parse,sys; print(urllib.parse.quote_plus(sys.argv[1]))" "$raw"
+    elif command -v python >/dev/null 2>&1; then
+        python -c "import urllib.parse,sys; print(urllib.parse.quote_plus(sys.argv[1]))" "$raw"
     else
-        path_filter="${path_filter}+OR+path:*.${ext}"
+        # fallback: basic encoding
+        echo "$raw" | sed 's/ /+/g; s/:/%3A/g; s/(/%28/g; s/)/%29/g; s/"/%22/g; s/#/%23/g; s/&/%26/g; s/=/%3D/g'
+    fi
+}
+
+# --- Prepare subsets ---
+term_subsets=()
+ext_subsets=()
+subsets_non_empty search_terms term_subsets
+subsets_non_empty extensions ext_subsets
+
+# If no term subsets exist, leave term_subsets empty (we'll skip term-specific loops)
+# If no ext subsets exist, likewise.
+
+declare -A seen_urls
+results=()
+
+# ---------- Generate combinations WITH user (if users provided) ----------
+for user in "${github_users[@]}"; do
+    # 1) user-only
+    full_query="user:${user}"
+    encoded=$(url_encode "$full_query")
+    url="${base_url}${encoded}&type=${search_type}"
+    label="[USER]"
+    if [[ -z "${seen_urls[$url]:-}" ]]; then
+        results+=("${label} ${url}")
+        seen_urls["$url"]=1
+    fi
+
+    # 2) user + term (each non-empty term subset)
+    for term_subset in "${term_subsets[@]:-}"; do
+        if [[ -z "${term_subset// /}" ]]; then
+            continue
+        fi
+        full_query="user:${user} ${term_subset}"
+        encoded=$(url_encode "$full_query")
+        url="${base_url}${encoded}&type=${search_type}"
+        label="[USER][TERM]"
+        if [[ -z "${seen_urls[$url]:-}" ]]; then
+            results+=("${label} ${url}")
+            seen_urls["$url"]=1
+        fi
+    done
+
+    # 3) user + ext (each non-empty ext subset)
+    for ext_subset in "${ext_subsets[@]:-}"; do
+        if [[ -z "${ext_subset// /}" ]]; then
+            continue
+        fi
+        path_filter=""
+        for e in $ext_subset; do
+            [[ -n "$path_filter" ]] && path_filter+=" OR "
+            path_filter+="path:*.$e"
+        done
+        full_query="user:${user} (${path_filter})"
+        encoded=$(url_encode "$full_query")
+        url="${base_url}${encoded}&type=${search_type}"
+        label="[USER][EXT]"
+        if [[ -z "${seen_urls[$url]:-}" ]]; then
+            results+=("${label} ${url}")
+            seen_urls["$url"]=1
+        fi
+    done
+
+    # 4) user + term + ext (cross product of non-empty term & ext subsets)
+    for term_subset in "${term_subsets[@]:-}"; do
+        if [[ -z "${term_subset// /}" ]]; then
+            continue
+        fi
+        for ext_subset in "${ext_subsets[@]:-}"; do
+            if [[ -z "${ext_subset// /}" ]]; then
+                continue
+            fi
+            path_filter=""
+            for e in $ext_subset; do
+                [[ -n "$path_filter" ]] && path_filter+=" OR "
+                path_filter+="path:*.$e"
+            done
+            full_query="user:${user} ${term_subset} (${path_filter})"
+            encoded=$(url_encode "$full_query")
+            url="${base_url}${encoded}&type=${search_type}"
+            label="[USER][TERM][EXT]"
+            if [[ -z "${seen_urls[$url]:-}" ]]; then
+                results+=("${label} ${url}")
+                seen_urls["$url"]=1
+            fi
+        done
+    done
+done
+
+# ---------- Generate combinations WITHOUT user ----------
+# 5) term-only (each non-empty term subset)
+for term_subset in "${term_subsets[@]:-}"; do
+    if [[ -z "${term_subset// /}" ]]; then
+        continue
+    fi
+    full_query="${term_subset}"
+    encoded=$(url_encode "$full_query")
+    url="${base_url}${encoded}&type=${search_type}"
+    label="[TERM]"
+    if [[ -z "${seen_urls[$url]:-}" ]]; then
+        results+=("${label} ${url}")
+        seen_urls["$url"]=1
     fi
 done
 
-combined_query="user:${github_user} (${path_filter})"
-encoded_query=$(echo "$combined_query" | sed 's/ /+/g' | sed 's/:/%3A/g' | sed 's/(/%28/g' | sed 's/)/%29/g')
-search_url="${base_url}${encoded_query}&type=${search_type}"
+# 6) ext-only (each non-empty ext subset)
+for ext_subset in "${ext_subsets[@]:-}"; do
+    if [[ -z "${ext_subset// /}" ]]; then
+        continue
+    fi
+    path_filter=""
+    for e in $ext_subset; do
+        [[ -n "$path_filter" ]] && path_filter+=" OR "
+        path_filter+="path:*.$e"
+    done
+    full_query="(${path_filter})"
+    encoded=$(url_encode "$full_query")
+    url="${base_url}${encoded}&type=${search_type}"
+    label="[EXT]"
+    if [[ -z "${seen_urls[$url]:-}" ]]; then
+        results+=("${label} ${url}")
+        seen_urls["$url"]=1
+    fi
+done
 
-echo "Generated GitHub Search URL:"
-echo "$search_url"
+# 7) term + ext (cross product of non-empty term & ext subsets)
+for term_subset in "${term_subsets[@]:-}"; do
+    if [[ -z "${term_subset// /}" ]]; then
+        continue
+    fi
+    for ext_subset in "${ext_subsets[@]:-}"; do
+        if [[ -z "${ext_subset// /}" ]]; then
+            continue
+        fi
+        path_filter=""
+        for e in $ext_subset; do
+            [[ -n "$path_filter" ]] && path_filter+=" OR "
+            path_filter+="path:*.$e"
+        done
+        full_query="${term_subset} (${path_filter})"
+        encoded=$(url_encode "$full_query")
+        url="${base_url}${encoded}&type=${search_type}"
+        label="[TERM][EXT]"
+        if [[ -z "${seen_urls[$url]:-}" ]]; then
+            results+=("${label} ${url}")
+            seen_urls["$url"]=1
+        fi
+    done
+done
+
+# ---------- Output ----------
+echo
+if [[ ${#results[@]} -eq 0 ]]; then
+    echo "No combinations generated. Provide at least terms, extensions or users."
+    exit 0
+fi
+
+echo "Generated conditional GitHub search URLs (${#results[@]}):"
+i=1
+for entry in "${results[@]}"; do
+    printf "%3d) %s\n" "$i" "$entry"
+    ((i++))
+done
+
+# --- optional clipboard copy (strip labels) ---
+strip_labels() {
+    # remove leading bracket groups like [USER][TERM] etc.
+    sed -E 's/^(\[[A-Z]+\])+[[:space:]]*//'
+}
+
+if command -v xclip >/dev/null 2>&1; then
+    printf "%s\n" "${results[@]}" | strip_labels | xclip -selection clipboard
+    echo
+    echo "All URLs copied to clipboard (xclip)."
+elif command -v pbcopy >/dev/null 2>&1; then
+    printf "%s\n" "${results[@]}" | strip_labels | pbcopy
+    echo
+    echo "All URLs copied to clipboard (pbcopy)."
+fi
