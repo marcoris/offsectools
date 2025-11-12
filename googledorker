@@ -1,33 +1,153 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-# Greeting
-echo "Google Dorker - Creation of prioritized Google Dork URLs"
+# Google Dorker - Creation of prioritized Google Dork URLs
+echo "Google Dorker - creation of prioritized Google Dork URLs"
 echo "-------------------------------------------------------"
 
-# Input for the base query or URL
-read -p "Enter the URL or search term (e.g., example.com): " base_query
+read -rp "Base query / domain (e.g. example.com): " base_query
+echo
 
-# Input for prioritized dorks (site:, inurl:, intitle:) – user provides these
-read -p "Enter prioritized dorks (e.g., site:, inurl:, intitle:) - separated by spaces: " -a priority_dorks
+echo "Now enter prioritized dorks, one per line. Empty line ends input."
+echo "Examples:"
+echo "  inurl:top.htm"
+echo "  inurl:currenttime"
+echo "  allintitle: restricted"
+echo "(You can include dorks with spaces.)"
+echo
 
-# Input for additional dorks (e.g., ext:, filetype:, etc.)
-read -p "Enter additional dorks (e.g., ext:, filetype:) - separated by spaces: " -a additional_dorks
+# read prioritized dorks line-by-line until empty line
+priority_dorks=()
+while true; do
+    IFS= read -r line || true
+    [[ -z "${line// /}" ]] && break    # stop on empty line (also if only spaces)
+    priority_dorks+=("$line")
+done
 
-# Generate the loop for complete search queries
-echo "Generated Google search URLs:"
-for priority_dork in "${priority_dorks[@]}"; do
-    # Combine prioritized dork with the base query
-    base_combined_query="${priority_dork}:${base_query}"
+echo
+echo "Now enter additional dorks, one per line. Empty line ends input."
+echo "Examples:"
+echo "  filetype:doc"
+echo "  site:gov"
+echo
 
-    for additional_dork in "${additional_dorks[@]}"; do
-        # Combine additional dork with the prioritized combination
-        full_query="${base_combined_query} ${additional_dork}"
+additional_dorks=()
+while true; do
+    IFS= read -r line || true
+    [[ -z "${line// /}" ]] && break
+    additional_dorks+=("$line")
+done
 
-        # URL-encoded query
-        encoded_query=$(echo "$full_query" | sed 's/ /+/g')
+# helper: generate all non-empty subsets of an array (returns array of strings)
+subsets_non_empty() {
+    local -n arr=$1
+    local -n out=$2
+    out=()
+    local n=${#arr[@]}
+    local max=$((1<<n))
+    for ((mask=1; mask<max; mask++)); do
+        local parts=()
+        for ((i=0;i<n;i++)); do
+            if (( (mask>>i) & 1 )); then
+                parts+=("${arr[i]}")
+            fi
+        done
+        local joined
+        printf -v joined "%s " "${parts[@]}"
+        joined="${joined% }"
+        out+=("$joined")
+    done
+}
 
-        # Create the search URL and output it
-        search_url="https://www.google.com/search?q=${encoded_query}"
-        echo "$search_url"
+# produce subsets
+priority_subsets=()
+additional_subsets=()
+subsets_non_empty priority_dorks priority_subsets
+subsets_non_empty additional_dorks additional_subsets
+
+# allow empty subset to combine with other side
+priority_with_empty=("" "${priority_subsets[@]}")
+additional_with_empty=("" "${additional_subsets[@]}")
+
+# URL encode function: prefer python3; otherwise fallback to a simple encoder
+url_encode() {
+    local raw="$1"
+    if command -v python3 >/dev/null 2>&1; then
+        python3 -c "import urllib.parse,sys; print(urllib.parse.quote_plus(sys.argv[1]))" "$raw"
+    elif command -v python >/dev/null 2>&1; then
+        python -c "import urllib.parse,sys; print(urllib.parse.quote_plus(sys.argv[1]))" "$raw"
+    else
+        local encoded
+        encoded=$(printf '%s' "$raw" \
+            | sed -e 's/ /+/g' \
+                  -e 's/:/%3A/g' \
+                  -e 's/\//%2F/g' \
+                  -e 's/#/%23/g' \
+                  -e 's/"/%22/g' \
+                  -e "s/'/%27/g" \
+                  -e 's/?/%3F/g' \
+                  -e 's/=/%3D/g' \
+                  -e 's/&/%26/g' \
+                  -e 's/,/%2C/g')
+        printf '%s' "$encoded"
+    fi
+}
+
+declare -A seen_urls
+results=()
+
+# Combine priority (maybe empty) + base_query + additional (maybe empty)
+for p in "${priority_with_empty[@]}"; do
+    for a in "${additional_with_empty[@]}"; do
+        # skip both empty (would produce only the base query)
+        if [[ -z "${p// /}" && -z "${a// /}" ]]; then
+            continue
+        fi
+
+        query_parts=()
+        if [[ -n "${p// /}" ]]; then
+            query_parts+=("$p")
+        fi
+        if [[ -n "${base_query// /}" ]]; then
+            query_parts+=("$base_query")
+        fi
+        if [[ -n "${a// /}" ]]; then
+            query_parts+=("$a")
+        fi
+
+        printf -v full_query "%s " "${query_parts[@]}"
+        full_query="${full_query% }"
+
+        encoded=$(url_encode "$full_query")
+        search_url="https://www.google.com/search?q=${encoded}"
+
+        if [[ -z "${seen_urls[$search_url]:-}" ]]; then
+            results+=("$search_url")
+            seen_urls["$search_url"]=1
+        fi
     done
 done
+
+if [[ ${#results[@]} -eq 0 ]]; then
+    echo "No combinations generated (no dorks entered?)."
+    exit 0
+fi
+
+echo
+echo "Generated Google search URLs (${#results[@]}):"
+i=1
+for u in "${results[@]}"; do
+    printf "%3d) %s\n" "$i" "$u"
+    ((i++))
+done
+
+# Optional: copy to clipboard if available
+if command -v xclip >/dev/null 2>&1; then
+    printf "%s\n" "${results[@]}" | xclip -selection clipboard
+    echo
+    echo "All URLs copied to clipboard (xclip)."
+elif command -v pbcopy >/dev/null 2>&1; then
+    printf "%s\n" "${results[@]}" | pbcopy
+    echo
+    echo "All URLs copied to clipboard (pbcopy)."
+fi
