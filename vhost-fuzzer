@@ -19,7 +19,7 @@ if [[ "$1" == "-h" || "$1" == "--help" ]]; then
 fi
 
 # Check if the required arguments are provided
-if [ "$#" -ne 4 ]; then
+if [ "$#" -lt 4 ]; then
     echo "Error: Missing or incorrect arguments."
     show_help
     exit 1
