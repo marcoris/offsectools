@@ -2,10 +2,14 @@
 
 # Function to display script usage
 show_help() {
-    echo "Usage: $0 <DOMAIN> <WORDLIST> <URL> <FS Filter>"
+    echo "Usage: $0 <DOMAIN> <WORDLIST> <URL> <FS Filter> [Additional ffuf args]"
     echo "   -h, --help     Display this help and exit"
     echo
     echo "This script is a vhost fuzzer using ffuf for people who may forget the syntax."
+    echo
+    echo "Example:"
+    echo "  $0 example.com wordlist.txt https://example.com 138"
+    echo "  $0 example.com wordlist.txt https://example.com 138 '-t 100 -rate 50'"
 }
 
 # Check if the help option is provided
@@ -26,6 +30,7 @@ DOMAIN="$1"
 WORDLIST="$2"
 URL="$3"
 FS="$4"
+EXTRA_ARGS="${5:-}"
 
 # Run ffuf command
-ffuf -H "Host: FUZZ.$DOMAIN" -H "User-Agent: PENTEST" -c -w "$WORDLIST" -u "$URL" -fs "$FS"
+ffuf -H "Host: FUZZ.$DOMAIN" -H "User-Agent: PENTESTING" -c -w "$WORDLIST" -u "$URL" -fs "$FS" $EXTRA_ARGS
