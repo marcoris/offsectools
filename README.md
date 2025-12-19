@@ -1,6 +1,10 @@
 # offsectools
 Scripts and binaries for offensive security
 
+## ToDo
+> important!!!  
+> Update github (api) urls
+
 ## Download kali
 https://www.kali.org/get-kali/#kali-virtual-machines
 
