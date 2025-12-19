@@ -67,7 +67,7 @@ install_rustscan() {
 	FILE_NAME=$(basename "$LATEST_RUSTSCAN_RELEASE_URL")
 
 	if [[ -z "$LATEST_RUSTSCAN_RELEASE_URL" ]]; then
-		echo -e "${RED}[!]${NC} Download-Link was not found!"
+		echo -e "${RED}[!]${NC} RUSTSCAN download link was not found!"
 		exit 1
 	fi
  
