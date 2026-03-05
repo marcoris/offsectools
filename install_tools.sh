@@ -63,8 +63,7 @@ done
 # Download other tools on github
 install_rustscan() {
 	# Download latest rustscan
-	LATEST_RUSTSCAN_RELEASE_URL=$(curl -s "https://api.github.com/repos/RustScan/RustScan/releases/latest" | grep "browser_download_url" | grep "amd64.deb" | cut -d '"' -f 4)
-	FILE_NAME=$(basename "$LATEST_RUSTSCAN_RELEASE_URL")
+	LATEST_RUSTSCAN_RELEASE_URL=$(curl -s https://api.github.com/repos/bee-san/RustScan/releases/latest | jq -r '.assets[] | select(.name=="x86-linux-rustscan.zip") | .browser_download_url')
 
 	if [[ -z "$LATEST_RUSTSCAN_RELEASE_URL" ]]; then
 		echo -e "${RED}[!]${NC} RUSTSCAN download link was not found!"
@@ -80,15 +79,16 @@ install_rustscan() {
 		echo -e "${RED}[!]${NC} Could not download rustscan."
 		exit 1
 	fi
- 
+
+ 	FILE_NAME=$(basename "$LATEST_RUSTSCAN_RELEASE_URL")
 	echo -e "${BLUE}[*]${NC} Installing rustscan..."
-	sudo dpkg -i "$FILE_NAME"
-	sudo rm "$FILE_NAME"
+	unzip x86-linux-rustscan.zip
+	sudo mv rustscan /usr/bin/rustscan
   
   	if command -v rustscan &>/dev/null; then
    		echo -e "${GREEN}[+]${NC} rustscan is installed!"
    	else
-    		echo -e "${RED}[!]${NC} rustscan could not be installed!"
+    	echo -e "${RED}[!]${NC} rustscan could not be installed!"
   	fi
 }
 
