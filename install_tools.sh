@@ -6,9 +6,6 @@ MAGENTA="\e[35m"
 BLUE="\e[36m"
 NC="\e[0m"
 
-echo -e "${BLUE}[i]${NC} Updating apt..."
-sudo apt update
-
 # Install tools
 tools_list=(
 	assetfinder
