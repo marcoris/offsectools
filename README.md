@@ -17,3 +17,6 @@ git clone https://github.com/marcoris/offsectools.git && cd offsectools
 ```
 sudo ./install_tools.sh
 ```
+```
+curl -sSfL https://raw.githubusercontent.com/marcoris/offsectools/refs/heads/master/install_tools.sh | sh
+```
