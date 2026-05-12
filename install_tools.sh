@@ -17,6 +17,7 @@ tools_list=(
 	peass
 	sublist3r
 	subfinder
+	creds
 )
 
 for tool in "${tools_list[@]}"; do
@@ -51,6 +52,7 @@ scripts_list=(
 	googledorker
 	update-hosts
 	vhost-fuzzer
+	defaultcreds
 )
 
 for tool in "${scripts_list[@]}"; do
