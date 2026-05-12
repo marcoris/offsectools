@@ -1,0 +1,24 @@
+#!/bin/bash
+
+if [ -z "$1" ]; then
+  echo "Usage: $0 <search_term>"
+  exit 1
+fi
+
+search_term="$1"
+
+creds search "$search_term" | awk '
+BEGIN { FS="|" }
+/^\|/ {
+    gsub(/^[ \t]+|[ \t]+$/, "", $3)
+    gsub(/^[ \t]+|[ \t]+$/, "", $4)
+
+    user=$3
+    pass=$4
+
+    if (pass ~ /<.*>/) pass=""
+
+    if (user != "username" && user != "") {
+        print user ":" pass
+    }
+}'
