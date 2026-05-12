@@ -17,8 +17,9 @@ BEGIN { FS="|" }
     pass=$4
 
     if (pass ~ /<.*>/) pass=""
+    if (pass ~ /<.*>/) pass=""
 
-    if (user != "username" && user != "") {
+    if (user != "username") {
         print user ":" pass
     }
 }'
